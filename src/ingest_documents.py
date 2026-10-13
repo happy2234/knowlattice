@@ -222,6 +222,37 @@ def search_document_chunks(project_name: str, query: str) -> list[dict]:
         "pending", "not yet", "cannot proceed", "can't proceed",
     )
 
+    ownership_question = any(
+        phrase in q for phrase in
+        ("who owns", "owner", "ownership", "responsible", "who leads")
+    )
+    decision_question = any(
+        phrase in q for phrase in
+        ("decision", "decided", "approved", "approval", "what was agreed")
+    )
+
+    intent_markers = ()
+    ownership_question = any(
+        phrase in q for phrase in
+        ("who owns", "owner", "ownership", "responsible", "who leads")
+    )
+    decision_question = any(
+        phrase in q for phrase in
+        ("decision", "decided", "approved", "approval", "what was agreed")
+    )
+
+    intent_markers = ()
+    if ownership_question:
+        intent_markers = (
+            "owns", "owner", "ownership", "responsible",
+            "overseeing", "leads", "lead", "coordinates",
+        )
+    elif decision_question:
+        intent_markers = (
+            "decision", "decided", "approved", "approval",
+            "agreed", "migrate", "migration",
+        )
+
     db = FalkorDB(host="localhost", port=6379)
     graph = db.select_graph(GRAPH_NAME)
     result = graph.query(
@@ -238,11 +269,10 @@ def search_document_chunks(project_name: str, query: str) -> list[dict]:
         full_text = " ".join((text or "").split())
         # Remove common section headings so they do not pollute evidence excerpts.
         full_text = re.sub(
-            r"\b(?:PROJECT STATUS|CURRENT BLOCKER|OWNERSHIP|DECISION|"
-            r"NEXT ACTIONS|SOURCE NOTE)\b\s*",
+            r"(?im)^(?:PROJECT STATUS|CURRENT BLOCKER|OWNERSHIP|DECISION|"
+            r"NEXT ACTIONS|SOURCE NOTE)\s*:?\s*",
             "",
             full_text,
-            flags=re.IGNORECASE,
         )
         sentences = re.split(r"(?<=[.!?])\s+", full_text)
         scored_sentences = []
@@ -269,6 +299,12 @@ def search_document_chunks(project_name: str, query: str) -> list[dict]:
 
             if has_blocker_evidence:
                 score += 1.0
+
+            if intent_markers and any(
+                marker in sentence.casefold()
+                for marker in intent_markers
+            ):
+                score += 1.5
 
             # A sentence mentioning the project is useful context, but should
             # not outrank a direct blocker explanation by itself.

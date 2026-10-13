@@ -1,5 +1,6 @@
 import pytest
 
+from src import ingest_documents
 from src.ingest_documents import extract_pages
 
 
@@ -82,3 +83,77 @@ def test_search_ranking_prefers_blocker_sentences(monkeypatch):
     assert ingest_documents.search_document_chunks(
         "Atlas Migration", "lattice"
     ) == []
+
+
+def test_search_ranking_prefers_ownership_sentence(monkeypatch):
+    class FakeResult:
+        result_set = [(
+            "atlas_update.txt",
+            1,
+            (
+                "The Atlas Migration project is currently blocked. "
+                "Priya Sharma is the Platform Engineer responsible for "
+                "coordinating the migration work. "
+                "The team approved the decision to migrate to PostgreSQL 17."
+            ),
+            "upload://doc_test/atlas_update.txt#page=1",
+        )]
+
+    class FakeGraph:
+        def query(self, *args, **kwargs):
+            return FakeResult()
+
+    class FakeDB:
+        def select_graph(self, name):
+            return FakeGraph()
+
+    monkeypatch.setattr(
+        ingest_documents,
+        "FalkorDB",
+        lambda **kwargs: FakeDB(),
+    )
+
+    results = ingest_documents.search_document_chunks(
+        "Atlas Migration",
+        "Who is responsible for Atlas Migration?",
+    )
+
+    assert results
+    assert "responsible for coordinating" in results[0]["text"]
+
+
+def test_search_ranking_prefers_decision_sentence(monkeypatch):
+    class FakeResult:
+        result_set = [(
+            "atlas_update.txt",
+            1,
+            (
+                "The Atlas Migration project is currently blocked. "
+                "Priya Sharma is the Platform Engineer responsible for "
+                "coordinating the migration work. "
+                "The team approved the decision to migrate to PostgreSQL 17."
+            ),
+            "upload://doc_test/atlas_update.txt#page=1",
+        )]
+
+    class FakeGraph:
+        def query(self, *args, **kwargs):
+            return FakeResult()
+
+    class FakeDB:
+        def select_graph(self, name):
+            return FakeGraph()
+
+    monkeypatch.setattr(
+        ingest_documents,
+        "FalkorDB",
+        lambda **kwargs: FakeDB(),
+    )
+
+    results = ingest_documents.search_document_chunks(
+        "Atlas Migration",
+        "What decision was approved for Atlas Migration?",
+    )
+
+    assert results
+    assert "approved the decision" in results[0]["text"]

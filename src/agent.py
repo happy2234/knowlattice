@@ -55,7 +55,61 @@ def answer_question(question: str) -> dict:
 
     evidence = report["evidence"]
 
-    if any(word in q for word in ("who owns", "owner", "responsible")):
+    evidence_question = any(
+        phrase in q
+        for phrase in (
+            "what evidence",
+            "evidence supports",
+            "supporting evidence",
+            "show the evidence",
+            "what sources",
+        )
+    )
+
+    if evidence_question:
+        tickets = data.get("tickets", [])
+        messages = data.get("messages", [])
+        decisions = data.get("decisions", [])
+
+        parts = ["Evidence recorded for " + project_name + ":"]
+        evidence = []
+
+        for ticket in tickets:
+            claim = (
+                f"Ticket {ticket['id']}: {ticket['title']} "
+                f"(status: {ticket['status']})."
+            )
+            parts.append(claim)
+            evidence.append({
+                "type": "ticket",
+                "id": ticket["id"],
+                "claim": claim,
+                "source": ticket["source"],
+            })
+
+        for message in messages:
+            claim = f"Message {message['id']}: {message['content']}"
+            parts.append(claim)
+            evidence.append({
+                "type": "chat",
+                "id": message["id"],
+                "claim": message["content"],
+                "source": message["source"],
+            })
+
+        for decision in decisions:
+            claim = (
+                f"Decision: {decision['title']} "
+                f"(status: {decision['status']})."
+            )
+            parts.append(claim)
+            evidence.append({
+                "type": "decision",
+                "claim": claim,
+                "source": "FalkorDB knowledge graph",
+            })
+
+    elif any(word in q for word in ("who owns", "owner", "responsible")):
         project_owners = data.get("owners", [])
 
         answer = (
@@ -181,24 +235,63 @@ def answer_question(question: str) -> dict:
     else:
         answer = report["answer"]
 
-    # Retrieve keyword-matched passages from uploaded project documents.
+    # Retrieve uploaded-document passages once and add each source once.
     document_matches = search_document_chunks(project_name, question)
+
+    if evidence_question:
+        for decision in data.get("decisions", []):
+            for person in decision.get("decision_makers", []):
+                parts.append(
+                    f"{person} recorded the decision: {decision['title']}."
+                )
+            for person in decision.get("responsible_people", []):
+                parts.append(
+                    f"{person} is responsible for: {decision['title']}."
+                )
+
+    blocker_question = any(
+        word in q
+        for word in (
+            "block", "blocked", "blocker", "blocking",
+            "stuck", "delay", "issue", "problem", "why",
+        )
+    )
 
     for match in document_matches[:5]:
         excerpt = " ".join((match.get("text") or "").split())
-        if len(excerpt) > 700:
-            excerpt = excerpt[:700].rsplit(" ", 1)[0] + "..."
+        if not excerpt:
+            continue
 
-        # Incorporate uploaded-document evidence into blocker answers.
-        if (
-            excerpt
-            and any(
-                word in q
-                for word in (
-                    "block", "blocked", "blocker", "blocking",
-                    "stuck", "delay", "issue", "problem", "why",
-                )
+        # Avoid duplicating the same uploaded file/page already in evidence.
+        duplicate = any(
+            item.get("type") == "uploaded_document"
+            and item.get("filename") == match.get("filename")
+            and item.get("page") == match.get("page")
+            for item in evidence
+        )
+        if duplicate:
+            continue
+
+        evidence.append({
+            "type": "uploaded_document",
+            "filename": match["filename"],
+            "page": match["page"],
+            "claim": excerpt,
+            "matched_terms": match.get("matched_terms", []),
+            "source": match["source"],
+        })
+
+        if evidence_question:
+            parts.append(
+                f"Uploaded document {match['filename']}, page "
+                f"{match['page']}: {excerpt}"
             )
+
+        # Keep document passages in evidence for all intents, but only
+        # append blocker-specific prose to blocker answers.
+        if (
+            blocker_question
+            and not evidence_question
             and any(
                 marker in excerpt.casefold()
                 for marker in (
@@ -211,21 +304,21 @@ def answer_question(question: str) -> dict:
             answer += (
                 f" Uploaded document '{match['filename']}', page "
                 f"{match['page']}, states: {excerpt}"
-            )
-            answer += (
                 " This supports schema validation as the current blocker, "
-                "but the available evidence does not establish the root cause of the incomplete validation."
+                "but the available evidence does not establish the root cause "
+                "of the incomplete validation."
             )
 
-        evidence.append({
-            "type": "uploaded_document",
-            "filename": match["filename"],
-            "page": match["page"],
-            "claim": excerpt,
-            "matched_terms": match.get("matched_terms", []),
-            "source": match["source"],
-        })
-
+    if evidence_question:
+        if document_matches:
+            parts.append(
+                "The uploaded passages provide additional context; "
+                "the available records do not independently establish "
+                "the root cause of incomplete validation."
+            )
+        elif not tickets and not messages and not data.get("decisions", []):
+            parts.append("No matching evidence was found in the available records.")
+        answer = " ".join(parts)
 
     return {
         "found": True,
