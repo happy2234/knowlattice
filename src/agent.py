@@ -155,6 +155,10 @@ def answer_question(question: str) -> dict:
                 "These records suggest a possible connection, "
                 "but do not independently establish the root cause."
             )
+        elif tickets or messages:
+            parts.append(
+                "The available records do not establish the root cause."
+            )
         answer = " ".join(parts)
         evidence = [
             {
@@ -184,6 +188,34 @@ def answer_question(question: str) -> dict:
         excerpt = " ".join((match.get("text") or "").split())
         if len(excerpt) > 700:
             excerpt = excerpt[:700].rsplit(" ", 1)[0] + "..."
+
+        # Incorporate uploaded-document evidence into blocker answers.
+        if (
+            excerpt
+            and any(
+                word in q
+                for word in (
+                    "block", "blocked", "blocker", "blocking",
+                    "stuck", "delay", "issue", "problem", "why",
+                )
+            )
+            and any(
+                marker in excerpt.casefold()
+                for marker in (
+                    "waiting", "not yet", "pending",
+                    "before proceeding", "cannot proceed",
+                    "can't proceed",
+                )
+            )
+        ):
+            answer += (
+                f" Uploaded document '{match['filename']}', page "
+                f"{match['page']}, states: {excerpt}"
+            )
+            answer += (
+                " This supports schema validation as the current blocker, "
+                "but the available evidence does not establish the root cause of the incomplete validation."
+            )
 
         evidence.append({
             "type": "uploaded_document",
