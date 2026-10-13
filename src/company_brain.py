@@ -22,6 +22,14 @@ def investigate_company(project_name: str) -> dict:
 
     name, status = project.result_set[0]
 
+    owners = graph.query(
+        """
+        MATCH (p:Project {name: $name})-[:OWNED_BY]->(owner:Person)
+        RETURN owner.name, owner.role
+        """,
+        params={"name": project_name},
+    ).result_set
+
     tickets = graph.query(
         """
         MATCH (t:Ticket)-[:BLOCKS]->(p:Project {name: $name})
@@ -59,6 +67,10 @@ def investigate_company(project_name: str) -> dict:
         "found": True,
         "project": name,
         "status": status,
+        "owners": [
+            {"name": row[0], "role": row[1]}
+            for row in owners
+        ],
         "tickets": [
             {
                 "id": row[0],
