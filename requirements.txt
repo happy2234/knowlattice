@@ -1,0 +1,4 @@
+FalkorDB==1.7.1
+streamlit==1.65.0
+pypdf==6.20.1
+pytest==9.1.1
