@@ -236,6 +236,14 @@ def search_document_chunks(project_name: str, query: str) -> list[dict]:
     matches = []
     for filename, page, text, source in result.result_set:
         full_text = " ".join((text or "").split())
+        # Remove common section headings so they do not pollute evidence excerpts.
+        full_text = re.sub(
+            r"\b(?:PROJECT STATUS|CURRENT BLOCKER|OWNERSHIP|DECISION|"
+            r"NEXT ACTIONS|SOURCE NOTE)\b\s*",
+            "",
+            full_text,
+            flags=re.IGNORECASE,
+        )
         sentences = re.split(r"(?<=[.!?])\s+", full_text)
         scored_sentences = []
 
@@ -245,11 +253,21 @@ def search_document_chunks(project_name: str, query: str) -> list[dict]:
                 display for display, normalized in zip(display_terms, terms)
                 if normalized in sentence_terms
             ]
+            # Match complete normalized tokens; blocker evidence may qualify
+            # independently when the question specifically asks about blockers.
+            has_blocker_evidence = (
+                blocker_question
+                and any(
+                    marker in sentence.casefold()
+                    for marker in blocker_markers
+                )
+            )
+            if not matched_terms and not has_blocker_evidence:
+                continue
+
             score = len(matched_terms) / len(terms)
 
-            if blocker_question and any(
-                marker in sentence.casefold() for marker in blocker_markers
-            ):
+            if has_blocker_evidence:
                 score += 1.0
 
             # A sentence mentioning the project is useful context, but should
@@ -268,11 +286,6 @@ def search_document_chunks(project_name: str, query: str) -> list[dict]:
         if not scored_sentences:
             continue
 
-        scored_sentences.sort(
-            key=lambda item: (item["score"], len(item["matched_terms"])),
-            reverse=True,
-        )
-
         blocker_candidates = [
             item for item in scored_sentences
             if any(
@@ -282,30 +295,39 @@ def search_document_chunks(project_name: str, query: str) -> list[dict]:
         ]
 
         if blocker_question and blocker_candidates:
-            direct_blocker_markers = (
+            direct_markers = (
                 "wait", "pending", "not yet", "incomplete",
                 "has not been completed", "before it can proceed",
-                "cannot proceed", "can't proceed",
+                "before proceeding", "cannot proceed", "can't proceed",
             )
-
-            def blocker_priority(item):
-                sentence = item["sentence"].casefold()
-                direct_match = any(
-                    marker in sentence for marker in direct_blocker_markers
+            direct_candidates = [
+                item for item in blocker_candidates
+                if any(
+                    marker in item["sentence"].casefold()
+                    for marker in direct_markers
                 )
-                return (
-                    direct_match,
+            ]
+            candidates = direct_candidates or blocker_candidates
+            selected = sorted(
+                candidates,
+                key=lambda item: (
+                    len(item["matched_terms"]),
+                    item["score"],
+                    -item["index"],
+                ),
+                reverse=True,
+            )[:2]
+        else:
+            selected = sorted(
+                scored_sentences,
+                key=lambda item: (
                     item["score"],
                     len(item["matched_terms"]),
-                    -item["index"],
-                )
+                ),
+                reverse=True,
+            )[:3]
 
-            selected = sorted(
-                blocker_candidates, key=blocker_priority, reverse=True
-            )[:2]
-            selected.sort(key=lambda item: item["index"])
-        else:
-            selected = scored_sentences[:3]
+        selected.sort(key=lambda item: item["index"])
 
         excerpt = " ".join(item["sentence"] for item in selected)
         if len(excerpt) > 700:

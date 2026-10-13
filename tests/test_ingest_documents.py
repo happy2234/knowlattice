@@ -72,5 +72,13 @@ def test_search_ranking_prefers_blocker_sentences(monkeypatch):
 
     assert len(results) == 1
     assert "waiting for schema validation" in results[0]["text"]
+    assert "Schema validation has not yet been completed" in results[0]["text"]
+    assert "CURRENT BLOCKER" not in results[0]["text"]
     assert "Priya Sharma owns the project" not in results[0]["text"]
     assert results[0]["source"].endswith("#page=1")
+
+    # A substring of the product name "Knowlattice" must not count as
+    # a match for the standalone search term "lattice".
+    assert ingest_documents.search_document_chunks(
+        "Atlas Migration", "lattice"
+    ) == []
