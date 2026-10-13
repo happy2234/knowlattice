@@ -1,6 +1,7 @@
 from falkordb import FalkorDB
 from src.company_brain import investigate_company
 from src.answer import answer_company_question
+from src.ingest_documents import search_document_chunks
 
 
 def known_projects() -> list[str]:
@@ -175,6 +176,35 @@ def answer_question(question: str) -> dict:
 
     else:
         answer = report["answer"]
+
+    # Retrieve keyword-matched passages from uploaded project documents.
+    document_matches = search_document_chunks(project_name, question)
+
+    for match in document_matches[:5]:
+        excerpt = " ".join((match.get("text") or "").split())
+        if len(excerpt) > 700:
+            excerpt = excerpt[:700].rsplit(" ", 1)[0] + "..."
+
+        evidence.append({
+            "type": "uploaded_document",
+            "filename": match["filename"],
+            "page": match["page"],
+            "claim": excerpt,
+            "matched_terms": match.get("matched_terms", []),
+            "source": match["source"],
+        })
+
+    if document_matches:
+        passages = []
+        for match in document_matches[:3]:
+            excerpt = " ".join((match.get("text") or "").split())
+            if len(excerpt) > 500:
+                excerpt = excerpt[:500].rsplit(" ", 1)[0] + "..."
+            passages.append(
+                f"{match['filename']} (page {match['page']}): {excerpt}"
+            )
+
+        answer += " Relevant uploaded-document passages: " + " ".join(passages)
 
     return {
         "found": True,
