@@ -185,23 +185,28 @@ def search_document_chunks(project_name: str, query: str) -> list[dict]:
         "why", "will", "with", "would", "you", "your",
     }
 
-    def tokenize(value: str) -> list[str]:
-        tokens = re.findall(r"[a-zA-Z0-9_+-]+", value.casefold())
-        result = []
-        for token in tokens:
-            if len(token) > 5 and token.endswith("ing"):
-                token = token[:-3]
-            elif len(token) > 4 and token.endswith("ed"):
-                token = token[:-2]
-            elif len(token) > 4 and token.endswith("s"):
-                token = token[:-1]
-            result.append(token)
-        return result
+    def normalize_token(token: str) -> str:
+        token = token.casefold()
+        # Handle common verb endings without corrupting names such as Atlas.
+        if len(token) > 5 and token.endswith("ing"):
+            token = token[:-3]
+        elif len(token) > 4 and token.endswith("ed"):
+            token = token[:-2]
+        return token
 
-    raw_terms = tokenize(query)
+    def tokenize(value: str) -> list[str]:
+        return [
+            normalize_token(token)
+            for token in re.findall(r"[a-zA-Z0-9_+-]+", value)
+        ]
+
+    original_terms = re.findall(r"[a-zA-Z0-9_+-]+", query)
+    display_terms = list(dict.fromkeys(
+        term for term in original_terms
+        if term.casefold() not in stopwords and len(term) > 1
+    ))
     terms = list(dict.fromkeys(
-        term for term in raw_terms
-        if term not in stopwords and len(term) > 1
+        normalize_token(term) for term in display_terms
     ))
     if not terms:
         return []
@@ -236,7 +241,10 @@ def search_document_chunks(project_name: str, query: str) -> list[dict]:
 
         for index, sentence in enumerate(sentences):
             sentence_terms = set(tokenize(sentence))
-            matched_terms = [term for term in terms if term in sentence_terms]
+            matched_terms = [
+                display for display, normalized in zip(display_terms, terms)
+                if normalized in sentence_terms
+            ]
             score = len(matched_terms) / len(terms)
 
             if blocker_question and any(
@@ -264,7 +272,41 @@ def search_document_chunks(project_name: str, query: str) -> list[dict]:
             key=lambda item: (item["score"], len(item["matched_terms"])),
             reverse=True,
         )
-        selected = scored_sentences[:3]
+
+        blocker_candidates = [
+            item for item in scored_sentences
+            if any(
+                marker in item["sentence"].casefold()
+                for marker in blocker_markers
+            )
+        ]
+
+        if blocker_question and blocker_candidates:
+            direct_blocker_markers = (
+                "wait", "pending", "not yet", "incomplete",
+                "has not been completed", "before it can proceed",
+                "cannot proceed", "can't proceed",
+            )
+
+            def blocker_priority(item):
+                sentence = item["sentence"].casefold()
+                direct_match = any(
+                    marker in sentence for marker in direct_blocker_markers
+                )
+                return (
+                    direct_match,
+                    item["score"],
+                    len(item["matched_terms"]),
+                    -item["index"],
+                )
+
+            selected = sorted(
+                blocker_candidates, key=blocker_priority, reverse=True
+            )[:2]
+            selected.sort(key=lambda item: item["index"])
+        else:
+            selected = scored_sentences[:3]
+
         excerpt = " ".join(item["sentence"] for item in selected)
         if len(excerpt) > 700:
             excerpt = excerpt[:700].rsplit(" ", 1)[0] + "..."

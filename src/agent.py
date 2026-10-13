@@ -194,17 +194,6 @@ def answer_question(question: str) -> dict:
             "source": match["source"],
         })
 
-    if document_matches:
-        passages = []
-        for match in document_matches[:3]:
-            excerpt = " ".join((match.get("text") or "").split())
-            if len(excerpt) > 500:
-                excerpt = excerpt[:500].rsplit(" ", 1)[0] + "..."
-            passages.append(
-                f"{match['filename']} (page {match['page']}): {excerpt}"
-            )
-
-        answer += " Relevant uploaded-document passages: " + " ".join(passages)
 
     return {
         "found": True,

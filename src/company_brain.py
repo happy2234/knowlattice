@@ -46,6 +46,15 @@ def investigate_company(project_name: str) -> dict:
         params={"name": project_name},
     ).result_set
 
+    uploaded_documents = graph.query(
+        """
+        MATCH (d:IngestedDocument)-[:ABOUT]->(p:Project {name: $name})
+        OPTIONAL MATCH (d)-[:HAS_CHUNK]->(c:DocumentChunk)
+        RETURN d.filename, count(c)
+        """,
+        params={"name": project_name},
+    ).result_set
+
     decisions = graph.query(
         """
         MATCH (d:Decision)-[:AFFECTS]->(p:Project {name: $name})
@@ -67,6 +76,13 @@ def investigate_company(project_name: str) -> dict:
         "found": True,
         "project": name,
         "status": status,
+        "uploaded_documents": [
+            {
+                "filename": row[0],
+                "pages": row[1],
+            }
+            for row in uploaded_documents
+        ],
         "owners": [
             {"name": row[0], "role": row[1]}
             for row in owners
